@@ -1,0 +1,11 @@
+{
+  "name": "stakeRescueScript",
+  "version": "1.0.0",
+  "description": "Script for rescuing a Stake of a compromised wallet ending at a certain timestamp",
+  "main": "index.js",
+  "author": "coderipper",
+  "license": "MIT",
+  "dependencies": {
+    "ethers": "^6.10.0"
+  }
+}
