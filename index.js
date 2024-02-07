@@ -31,7 +31,7 @@ async function getPriorityGasPrice() {
     currentGasPrice + (currentGasPrice * BigInt(20)) / BigInt(100); // Adds 20%
 
   // Estimate gas limit for the transaction - you might want to adjust this based on your needs
-  const estimatedGasLimit = BigInt(55000); // Standard gas limit for BNB transfer
+  const estimatedGasLimit = BigInt(21000); // Standard gas limit for BNB transfer
 
   // Calculate the cost of gas for the transaction
   return {
