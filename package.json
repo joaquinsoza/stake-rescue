@@ -6,6 +6,10 @@
   "author": "coderipper",
   "license": "MIT",
   "dependencies": {
+    "dotenv": "^16.4.1",
     "ethers": "^6.10.0"
+  },
+  "scripts": {
+    "start": "node index.js"
   }
 }

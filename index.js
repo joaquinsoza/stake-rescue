@@ -1,82 +1,168 @@
 const { ethers } = require("ethers");
+const fs = require("fs").promises;
+require("dotenv").config();
 
 // Configuration
-const stakingContractAddress = "YOUR_STAKING_CONTRACT_ADDRESS";
-const tokenContractAddress = "YOUR_TOKEN_CONTRACT_ADDRESS";
-const recipientAddress = "YOUR_UNCOMPROMISED_WALLET_ADDRESS";
-const privateKey = "YOUR_PRIVATE_KEY"; // Be cautious with your private key
-const ankrRpcUrl = "https://rpc.ankr.com/bsc"; // BSC Ankr RPC URL
+const stakingContractAddress = process.env.STAKING_CONTRACT_ADDRESS;
+const tokenContractAddress = process.env.TOKEN_CONTRACT_ADDRESS;
+const recipientAddress = process.env.RECIPIENT_ADDRESS;
+const privateKey = process.env.PRIVATE_KEY;
+const ankrRpcUrl = process.env.ANKR_RPC_URL;
+const endTime = 1713618140;
 
-// ABI for the necessary functions
-const stakingContractAbi = [
-  // Add only the relevant parts of the ABI
-  "function withdraw() external returns (bool)",
-  // Include any other functions you might need to call
-];
-const tokenContractAbi = [
-  "function balanceOf(address owner) view returns (uint256)",
-  "function transfer(address to, uint amount) returns (bool)",
-];
-
-// Providers and signers
-const provider = new ethers.providers.JsonRpcProvider(ankrRpcUrl);
+// Providers
+const provider = new ethers.JsonRpcProvider(ankrRpcUrl);
 const wallet = new ethers.Wallet(privateKey, provider);
-const stakingContract = new ethers.Contract(
-  stakingContractAddress,
-  stakingContractAbi,
-  wallet
-);
-const tokenContract = new ethers.Contract(
-  tokenContractAddress,
-  tokenContractAbi,
-  wallet
-);
 
-// Main function
-async function main() {
+// Load ABIs
+async function loadAbi(file) {
+  const path = `${__dirname}/abi/${file}`;
+  const abi = await fs.readFile(path, "utf8");
+  return JSON.parse(abi);
+}
+
+async function getPriorityGasPrice() {
+  // Get the current gas price from the network
+  let currentGasPrice = (await provider.getFeeData()).gasPrice;
+
+  // Increase the gas price by a certain percentage to ensure faster transaction confirmation
+  // For example, adding 20% more to the current gas price for priority
+  let priorityGasPrice =
+    currentGasPrice + (currentGasPrice * BigInt(20)) / BigInt(100); // Adds 20%
+
+  // Estimate gas limit for the transaction - you might want to adjust this based on your needs
+  const estimatedGasLimit = BigInt(55000); // Standard gas limit for BNB transfer
+
+  // Calculate the cost of gas for the transaction
+  return {
+    gasCost: priorityGasPrice * estimatedGasLimit,
+    estimatedGasLimit,
+    priorityGasPrice,
+  };
+}
+
+async function transferAllNativeToSecureWallet() {
   try {
-    // Withdraw tokens
-    console.log("Attempting to withdraw tokens...");
-    const withdrawTx = await stakingContract.withdraw();
-    const withdrawReceipt = await withdrawTx.wait();
-    console.log(
-      `Withdraw transaction successful with hash: ${withdrawReceipt.transactionHash}`
-    );
+    const { gasCost, estimatedGasLimit, priorityGasPrice } =
+      await getPriorityGasPrice();
+    console.log("🚀 « gasCost:", ethers.formatEther(gasCost));
 
-    // Transfer tokens to secure wallet
-    console.log("Transferring tokens to secure wallet...");
-    const tokenBalance = await tokenContract.balanceOf(wallet.address);
+    // Fetch the current balance
+    const bnbBalance = await provider.getBalance(wallet.address);
+    console.log("🚀 ~ bnbBalance:", ethers.formatEther(bnbBalance));
+
+    // Calculate the amount to transfer, subtracting the cost of gas from the total balance
+    const amountToTransfer = bnbBalance - gasCost;
+    console.log("🚀 « amountToTransfer:", ethers.formatEther(amountToTransfer));
+
+    // Ensure the calculated amount to transfer is positive
+    if (amountToTransfer > 0) {
+      console.log("Transferring all BNB to secure wallet...");
+      // const bnbTransferTx = await wallet.sendTransaction({
+      //   to: recipientAddress,
+      //   value: amountToTransfer,
+      //   gasPrice: priorityGasPrice, // Use the calculated priority gas price
+      //   gasLimit: estimatedGasLimit,
+      // });
+      // await bnbTransferTx.wait();
+      // console.log(`BNB transfer successful: ${bnbTransferTx.hash}`);
+    } else {
+      console.log("Not enough BNB balance to cover the gas fees for transfer.");
+    }
+  } catch (error) {
+    console.error(`Failed to transfer BNB: ${error.message}`);
+  }
+}
+
+async function unstakeTokens() {
+  const stakingContractAbi = await loadAbi("stakeContractAbi.json");
+
+  const stakingContract = new ethers.Contract(
+    stakingContractAddress,
+    stakingContractAbi,
+    wallet
+  );
+
+  // Withdraw tokens
+  console.log("Attempting to withdraw tokens...");
+  const withdrawTx = await stakingContract.withdraw();
+  await withdrawTx.wait();
+  console.log(`Withdraw transaction successful: ${withdrawTx.hash}`);
+}
+
+async function transferTokensToSecureWallet() {
+  const tokenContractAbi = await loadAbi("tokenAbi.json");
+
+  const tokenContract = new ethers.Contract(
+    tokenContractAddress,
+    tokenContractAbi,
+    wallet
+  );
+
+  // Transfer tokens to secure wallet
+  const tokenBalance = await tokenContract.balanceOf(wallet.address);
+  console.log("🚀 « tokenBalance:", tokenBalance);
+  console.log("Transferring tokens to secure wallet...");
+  if (tokenBalance > 0) {
     const transferTx = await tokenContract.transfer(
       recipientAddress,
       tokenBalance
     );
-    const transferReceipt = await transferTx.wait();
-    console.log(
-      `Token transfer successful with hash: ${transferReceipt.transactionHash}`
-    );
-
-    // Transfer BNB to secure wallet
-    console.log("Transferring remaining BNB to secure wallet...");
-    const bnbBalance = await provider.getBalance(wallet.address);
-    // Ensure gas cost is covered and leave a little margin
-    const gasEstimate = ethers.utils.parseUnits("0.00021", "ether"); // Adjust based on current gas prices
-    const bnbTransferAmount = bnbBalance.sub(gasEstimate);
-    if (bnbTransferAmount.gt(0)) {
-      const bnbTransferTx = await wallet.sendTransaction({
-        to: recipientAddress,
-        value: bnbTransferAmount,
-      });
-      const bnbTransferReceipt = await bnbTransferTx.wait();
-      console.log(
-        `BNB transfer successful with hash: ${bnbTransferReceipt.transactionHash}`
-      );
-    } else {
-      console.log("Not enough BNB balance for transfer after gas.");
-    }
-  } catch (error) {
-    console.error(`An error occurred during the operation: ${error}`);
+    await transferTx.wait();
+    console.log(`Token transfer successful: ${transferTx.hash}`);
   }
 }
 
-// Execute the main function
-main();
+// Transaction Flow Function
+async function executeTransactionFlow() {
+  try {
+    // Unstake tokens
+    await unstakeTokens();
+
+    // Transfer tokens to secure wallet
+    await transferTokensToSecureWallet();
+
+    // Transfer BNB to secure wallet
+    await transferAllNativeToSecureWallet();
+  } catch (error) {
+    console.error(
+      `An error occurred during the transaction flow: ${error.message}`
+    );
+  }
+}
+
+// Main Function
+async function main() {
+  console.log(
+    "Starting to monitor the blockchain for the right block timestamp..."
+  );
+  while (true) {
+    const currentBlock = await provider.getBlock("latest");
+    if (currentBlock.timestamp >= endTime) {
+      console.log(
+        "Detected block timestamp >= endTime, executing transaction flow..."
+      );
+      await executeTransactionFlow();
+      break;
+    } else {
+      const remainingTime = endTime - currentBlock.timestamp;
+      const days = Math.floor(remainingTime / (60 * 60 * 24));
+      const hours = Math.floor((remainingTime % (60 * 60 * 24)) / (60 * 60));
+      const minutes = Math.floor((remainingTime % (60 * 60)) / 60);
+      const seconds = remainingTime % 60;
+
+      console.log(
+        "---------------------------------------------------------------"
+      );
+      console.log(currentBlock.timestamp, "Current block timestamp");
+      console.log(endTime, "End time");
+      console.log(
+        `${days} day(s), ${hours} hour(s), ${minutes} minute(s), ${seconds} second(s) remaining`
+      );
+    }
+    // Wait for a bit before checking again to avoid spamming your RPC provider
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
+main().catch(console.error);
