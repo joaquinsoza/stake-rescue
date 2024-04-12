@@ -157,32 +157,78 @@ async function executeTransactionFlow() {
 // Main function to monitor blockchain and execute transactions at the specified time
 async function main() {
   console.log("Monitoring blockchain for execution trigger...");
-  while (true) {
-    const currentBlock = await provider.getBlock("latest");
-    if (currentBlock.timestamp >= endTime) {
-      console.log("Trigger condition met, executing transactions...");
-      await executeTransactionFlow();
-      break;
-    } else {
-      // Display remaining time in a human-readable format
-      const remainingTime = endTime - currentBlock.timestamp;
-      const days = Math.floor(remainingTime / (60 * 60 * 24));
-      const hours = Math.floor((remainingTime % (60 * 60 * 24)) / (60 * 60));
-      const minutes = Math.floor((remainingTime % (60 * 60)) / 60);
-      const seconds = remainingTime % 60;
+  try {
+    await notifyAction("Stake rescue service started");
+  } catch (error) {
+    console.error("Failed to notify service start:", error);
+  }
 
-      console.log("Current block number", currentBlock.number);
-      console.log(currentBlock.timestamp, "Current block timestamp");
-      console.log(endTime, "End time");
-      console.log(
-        `Time until execution: ${days}d ${hours}h ${minutes}m ${seconds}s`
-      );
-      console.log(
-        "---------------------------------------------------------------"
+  while (true) {
+    let currentBlock;
+    try {
+      currentBlock = await provider.getBlock("latest");
+    } catch (error) {
+      console.error("Failed to fetch the latest block:", error);
+      console.log("Retrying in 10 seconds...");
+      await new Promise((resolve) => setTimeout(resolve, 10000)); // Increased wait time to reduce load and allow for recovery
+      continue; // Continue the loop, skipping the rest of this iteration
+    }
+
+    try {
+      if (currentBlock.timestamp >= endTime) {
+        console.log("Trigger condition met, executing transactions...");
+        try {
+          await notifyAction("Flow initiated");
+        } catch (notificationError) {
+          console.error(
+            "Failed to notify transaction initiation:",
+            notificationError
+          );
+        }
+        await executeTransactionFlow();
+        break; // Exit the loop after successful execution
+      } else {
+        // Display remaining time in a human-readable format
+        const remainingTime = endTime - currentBlock.timestamp;
+        const days = Math.floor(remainingTime / (60 * 60 * 24));
+        const hours = Math.floor((remainingTime % (60 * 60 * 24)) / (60 * 60));
+        const minutes = Math.floor((remainingTime % (60 * 60)) / 60);
+        const seconds = remainingTime % 60;
+
+        console.log("Current block number:", currentBlock.number);
+        console.log("Current block timestamp:", currentBlock.timestamp);
+        console.log("End time:", endTime);
+        console.log(
+          `Time until execution: ${days}d ${hours}h ${minutes}m ${seconds}s`
+        );
+        console.log(
+          "---------------------------------------------------------------"
+        );
+      }
+    } catch (executionError) {
+      console.error(
+        "Error during execution checking or flow initiation:",
+        executionError
       );
     }
+
     // Wait for a bit before checking again to avoid spamming your RPC provider
     await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
+// Function to send notifications
+async function notifyAction(message) {
+  try {
+    const response = await fetch(process.env.NTFY_URL, {
+      method: "POST",
+      body: message,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to send notification: ${response.statusText}`);
+    }
+  } catch (error) {
+    throw new Error(`Notification error: ${error.message}`);
   }
 }
 
